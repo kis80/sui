@@ -1,0 +1,37 @@
+name: PoC Object Withdrawal Inflation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: poc-test
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+      
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev protobuf-compiler libssl-dev pkg-config
+      
+      - name: Cache build
+        uses: Swatinem/rust-cache@v2
+      
+      - name: Run PoC
+        run: |
+          cargo test --package sui-e2e-tests \
+            --test poc_object_inflation \
+            -- test_no_balance_check_on_object_withdrawal \
+            --exact --nocapture 2>&1 | tee /tmp/poc_result.log
+        timeout-minutes: 90
+      
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: poc-results
+          path: /tmp/poc_result.log
