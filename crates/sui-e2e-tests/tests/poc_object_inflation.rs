@@ -17,14 +17,12 @@
 //!   - sui-framework/sources/funds_accumulator.move:89-93
 //!   - Move comment: "Does not abort even if the value is greater than the amount in the object"
 
-use std::sync::Arc;
-use sui_protocol_config::ProtocolConfig;
 use sui_test_transaction_builder::FundSource;
 use sui_types::effects::TransactionEffectsAPI;
-use test_cluster::addr_balance_test_env::{TestEnv, TestEnvBuilder};
+use test_cluster::addr_balance_test_env::TestEnvBuilder;
 
 #[tokio::test]
-async fn test_object_withdrawal_no_balance_check() {
+async fn test_no_balance_check_on_object_withdrawal() {
     println!("\n========================================");
     println!("  PoC: Object Withdrawal Inflation");
     println!("  Target: balance::withdraw_funds_from_object");
