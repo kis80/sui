@@ -14,7 +14,12 @@ jobs:
           ref: poc-test
       
       - name: Install Rust
-        uses: dtolnay/rust-action@stable
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          source "$HOME/.cargo/env"
+          rustc --version
+          cargo --version
       
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libclang-dev protobuf-compiler libssl-dev pkg-config
@@ -24,6 +29,7 @@ jobs:
       
       - name: Run PoC
         run: |
+          source "$HOME/.cargo/env"
           cargo test --package sui-e2e-tests \
             --test poc_object_inflation \
             -- test_no_balance_check_on_object_withdrawal \
